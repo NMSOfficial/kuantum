@@ -6,6 +6,7 @@ import numpy as np
 
 from kuantum.simulation.detector import default_geometry
 from kuantum.simulation.physics import CollisionEvent, generate_event
+from kuantum.simulation.main import EventLoop, SimulationConfig
 from predict import load_predictor
 
 
@@ -22,3 +23,19 @@ def test_predictor_outputs_integer_label():
     label = predictor.predict(dummy_features)
     assert isinstance(label, int)
     assert 0 <= label < 3
+
+
+def test_timeline_preloads_events():
+    geometry = default_geometry()
+    config = SimulationConfig(
+        max_events=None,
+        event_rate=3.0,
+        prediction_filter=None,
+        visualize=False,
+        simulation_duration=1.0,
+        initial_speed=1.0,
+    )
+    loop = EventLoop(geometry, config)
+    loop.prepare_timeline()
+    assert loop.timeline, "timeline should not be empty"
+    assert all(isinstance(frame.event, CollisionEvent) for frame in loop.timeline)

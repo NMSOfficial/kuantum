@@ -51,6 +51,12 @@ class DetectorGeometry:
             )
         return "\n".join(lines)
 
+    def get_layer(self, name: str) -> DetectorLayer:
+        for layer in self.layers:
+            if layer.name == name:
+                return layer
+        raise KeyError(f"Unknown detector layer: {name}")
+
 
 def default_geometry() -> DetectorGeometry:
     """Create a default three-layer detector geometry."""

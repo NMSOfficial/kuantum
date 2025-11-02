@@ -36,17 +36,24 @@ The visualisation step requires PyVista; if it is not installed, the simulation 
 To launch the event loop from the command line:
 
 ```bash
-python predict.py --events 5 --rate 1 --visualize
+python predict.py --duration 15 --rate 2 --speed 1.0 --visualize
 ```
 
 Command line options:
 
-- `--events`: number of events to generate (default 10).
-- `--rate`: target events per second (0 disables throttling).
+- `--duration`: length of the pre-generated simulation in seconds. If omitted, the CLI prompts interactively.
+- `--events`: optional hard limit on the number of generated events.
+- `--rate`: target events per second during playback (used to build the cinematic timeline).
+- `--speed`: initial playback speed multiplier; adjust live with the keyboard shortcuts shown in the console.
 - `--visualize`: enable real-time 3D rendering with PyVista.
 - `--filter`: only display events that the model predicts as a specific class label.
 
-The CLI prints a per-event summary and, when visualisation is enabled, renders detector layers with particle tracks and the predicted class label overlay.
+The CLI preloads every event into a futuristic “video” timeline, prints a per-event summary, and—when visualisation is enabled—renders neon detector layers, glowing interaction points, and HUD overlays that update with the model prediction.
+
+During playback use the keyboard to control the cinematic stream:
+
+- `+` speeds up the flow, `-` enters slow motion, and `1` resets to real-time.
+- `p` toggles pause/resume, while `q` gracefully ends the run.
 
 ## Programmatic usage
 
