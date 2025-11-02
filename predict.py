@@ -1,63 +1,58 @@
+"""Entry point for running predictions with the Kuantum model."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterable, Optional, Sequence
+
+import numpy as np
 import torch
-import numpy as np
-import matplotlib.pyplot as plt
-from einops import rearrange
-from model import TabAttention
 
-import pickle
-import numpy as np
+from kuantum.models import ModelArtifacts, load_model_and_scaler
+from kuantum.simulation.main import run_cli as run_simulation
 
-# scaler'ı yükle
-with open("/content/drive/MyDrive/NMSKuantumScaler.pkl", "rb") as f:
-    scaler = pickle.load(f)
 
-# modeli yükle
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-num_continuous = 33
+@dataclass
+class Predictor:
+    artifacts: ModelArtifacts
 
-model = TabAttention(
-    categories=[],
-    num_continuous=num_continuous,
-    dim=32,
-    depth=4,
-    heads=8,
-    dim_head=16,
-    dim_out=3,
-    attn_dropout=0.1,
-    ff_dropout=0.1,
-    lastmlp_dropout=0.0,
-    cont_embeddings='MLP',
-    attentiontype='col'
-).to(device)
+    @property
+    def device(self) -> torch.device:
+        return self.artifacts.device
 
-model.load_state_dict(torch.load("/content/drive/MyDrive/NMSKuantum.pt", map_location=device))
-model.eval()
+    @property
+    def model(self):
+        return self.artifacts.model
 
-# yardımcı fonksiyonlar (seninkilerle aynı)
-@torch.no_grad()
-def encode_cont(model, x_cont):
-    outs = []
-    for i in range(model.num_continuous):
-        v = model.simple_MLP[i](x_cont[:, i:i+1])
-        outs.append(v.unsqueeze(1))
-    return torch.cat(outs, dim=1) if outs else torch.empty((x_cont.size(0), 0, model.dim), device=x_cont.device)
+    @property
+    def scaler(self):
+        return self.artifacts.scaler
 
-@torch.no_grad()
-def encode_categ(model, x_categ):
-    if x_categ.numel() == 0:
-        return torch.empty((x_categ.size(0), 0, model.dim), device=x_categ.device)
-    x = x_categ + model.categories_offset.to(x_categ.device)
-    emb = model.embeds(x)
-    return emb
+    def predict(self, features: Sequence[float]) -> int:
+        array = np.asarray(features, dtype=np.float32)
+        if array.ndim == 1:
+            array = array.reshape(1, -1)
+        scaled = self.scaler.transform(array)
+        tensor = torch.tensor(scaled, dtype=torch.float32, device=self.device)
+        x_categ = torch.empty((tensor.size(0), 0), dtype=torch.long, device=self.device)
+        with torch.no_grad():
+            x_cont_enc = self.model.encode_continuous(tensor)
+            x_categ_enc = self.model.encode_categorical(x_categ)
+            logits = self.model(x_categ, tensor, x_categ_enc, x_cont_enc)
+            pred = torch.argmax(logits, dim=-1)
+        return int(pred.item())
 
-# 🔍 tek event tahmini
-@torch.no_grad()
-def predict_event(model, X_row):
-    X_scaled = scaler.transform(np.array(X_row).reshape(1, -1))
-    x_cont = torch.tensor(X_scaled, dtype=torch.float32, device=device)
-    x_categ = torch.empty((1, 0), dtype=torch.long, device=device)
-    x_cont_enc = encode_cont(model, x_cont)
-    x_categ_enc = encode_categ(model, x_categ)
-    logits = model(x_categ, x_cont, x_categ_enc, x_cont_enc)
-    pred = torch.argmax(logits, dim=-1).item()
-    return pred
+
+def load_predictor(config_path: Optional[Path] = None) -> Predictor:
+    artifacts = load_model_and_scaler(config_path)
+    return Predictor(artifacts=artifacts)
+
+
+def predict_event(features: Sequence[float], config_path: Optional[Path] = None) -> int:
+    predictor = load_predictor(config_path)
+    return predictor.predict(features)
+
+
+if __name__ == "__main__":
+    run_simulation()
