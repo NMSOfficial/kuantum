@@ -4,6 +4,13 @@ import matplotlib.pyplot as plt
 from einops import rearrange
 from model import TabAttention
 
+import pickle
+import numpy as np
+
+# scaler'ı yükle
+with open("/content/drive/MyDrive/NMSKuantumScaler.pkl", "rb") as f:
+    scaler = pickle.load(f)
+
 # modeli yükle
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 num_continuous = 33
@@ -46,7 +53,8 @@ def encode_categ(model, x_categ):
 # 🔍 tek event tahmini
 @torch.no_grad()
 def predict_event(model, X_row):
-    x_cont = torch.tensor(X_row, dtype=torch.float32, device=device).unsqueeze(0)
+    X_scaled = scaler.transform(np.array(X_row).reshape(1, -1))
+    x_cont = torch.tensor(X_scaled, dtype=torch.float32, device=device)
     x_categ = torch.empty((1, 0), dtype=torch.long, device=device)
     x_cont_enc = encode_cont(model, x_cont)
     x_categ_enc = encode_categ(model, x_categ)
