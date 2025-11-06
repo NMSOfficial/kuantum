@@ -46,21 +46,7 @@ class DetectorVisualizer:
             self._plotter.set_background("black", top="midnightblue")
             self._plotter.enable_anti_aliasing()
             self._plotter.enable_eye_dome_lighting()
-            enable_parallel_projection = getattr(self._plotter, "enable_parallel_projection", None)
-            if callable(enable_parallel_projection):
-                try:
-                    enable_parallel_projection(False)
-                except TypeError:
-                    disable_parallel_projection = getattr(
-                        self._plotter, "disable_parallel_projection", None
-                    )
-                    if callable(disable_parallel_projection):
-                        disable_parallel_projection()
-                    else:
-                        try:
-                            enable_parallel_projection()
-                        except Exception:
-                            pass
+            self._apply_parallel_projection(self._plotter, enable=False)
             for layer in self.geometry:
                 self._add_cylindrical_layer(self._plotter, layer)
             if self.show_overlay:
@@ -73,7 +59,11 @@ class DetectorVisualizer:
             self._register_callbacks(self._plotter)
             self._configure_camera(self._plotter)
         if not self._window_initialized:
-            self._plotter.show(auto_close=False, interactive_update=True)
+            try:
+                self._plotter.show(auto_close=False, interactive_update=True)
+            except TypeError:
+                # Some versions require keyword-only arguments
+                self._plotter.show(auto_close=False, interactive_update=True, interactive=False)
             self._window_initialized = True
         return self._plotter
 
@@ -153,25 +143,14 @@ class DetectorVisualizer:
             points = self._helical_track(direction, line_length)
             color = _futuristic_palette(index)
             spline = pv.Spline(points, n_points=200)
-            try:
-                actor = plotter.add_mesh(
-                    spline,
-                    color=color,
-                    line_width=4,
-                    render_lines_as_tubes=True,
-                    ambient=0.6,
-                    specular=0.8,
-                    smooth_shading=True,
-                )
-            except TypeError:
-                actor = plotter.add_mesh(
-                    spline,
-                    color=color,
-                    line_width=4,
-                    ambient=0.6,
-                    specular=0.8,
-                    smooth_shading=True,
-                )
+            track_mesh = spline.tube(radius=0.12)
+            actor = plotter.add_mesh(
+                track_mesh,
+                color=color,
+                ambient=0.6,
+                specular=0.8,
+                smooth_shading=True,
+            )
             self._dynamic_actors.append(actor)
 
             highlight = self._compute_highlight(particle.detector_layer, direction)
@@ -280,13 +259,6 @@ class DetectorVisualizer:
     def _register_callbacks(self, plotter: "pv.Plotter") -> None:
         if self._controller is None:
             return
-        # Register a futuristic "touch" listener: any left click will request slow motion
-        def _on_click(*_args, **_kwargs):
-            try:
-                self._controller.request_bullet_time()
-            except Exception:
-                return
-
         def _on_space(*_args, **_kwargs):
             try:
                 self._controller.toggle_pause()
@@ -294,11 +266,14 @@ class DetectorVisualizer:
                 return
 
         try:
-            plotter.add_mouse_event("LeftButtonPressEvent", _on_click)
             plotter.add_key_event("space", lambda: _on_space())
             plotter.add_key_event("b", lambda: self._controller.request_bullet_time())
         except Exception:
             # Optional backend support; ignore failures silently
+            pass
+        try:
+            plotter.enable_trackball_style()
+        except Exception:
             pass
 
     def _helical_track(self, direction: np.ndarray, length: float) -> np.ndarray:
@@ -340,6 +315,40 @@ class DetectorVisualizer:
                 (0.0, 0.0, 0.0),
                 (0.0, 0.0, 1.0),
             ]
-            plotter.enable_parallel_projection(False)
+            self._apply_parallel_projection(plotter, enable=False)
         except Exception:
             pass
+
+    def _apply_parallel_projection(self, plotter: "pv.Plotter", *, enable: bool) -> None:
+        toggle = getattr(plotter, "enable_parallel_projection", None)
+        disable = getattr(plotter, "disable_parallel_projection", None)
+        if enable:
+            if callable(toggle):
+                try:
+                    toggle(True)
+                    return
+                except TypeError:
+                    try:
+                        toggle()
+                        return
+                    except Exception:
+                        pass
+        else:
+            if callable(toggle):
+                try:
+                    toggle(False)
+                    return
+                except TypeError:
+                    try:
+                        if callable(disable):
+                            disable()
+                            return
+                        toggle()
+                        return
+                    except Exception:
+                        pass
+            if callable(disable):
+                try:
+                    disable()
+                except Exception:
+                    pass
