@@ -28,7 +28,7 @@ def _futuristic_palette(index: int) -> str:
 @dataclass
 class DetectorVisualizer:
     geometry: DetectorGeometry
-    show_overlay: bool = True
+    show_overlay: bool = False
     _plotter: Optional["pv.Plotter"] = field(default=None, init=False, repr=False)
     _dynamic_actors: List[object] = field(default_factory=list, init=False, repr=False)
     _hud_actor: Optional[object] = field(default=None, init=False, repr=False)
@@ -65,12 +65,13 @@ class DetectorVisualizer:
                 self._add_cylindrical_layer(self._plotter, layer)
             if self.show_overlay:
                 self._hud_actor = self._plotter.add_text(
-                    "KUANTUM // READY",
+                    "Collision stream ready",
                     position="upper_left",
                     font_size=14,
-                    color="cyan",
+                    color="white",
                 )
             self._register_callbacks(self._plotter)
+            self._configure_camera(self._plotter)
         if not self._window_initialized:
             self._plotter.show(auto_close=False, interactive_update=True)
             self._window_initialized = True
@@ -149,9 +150,28 @@ class DetectorVisualizer:
             norm = np.linalg.norm(direction) + 1e-9
             direction /= norm
             line_length = 12.0 * track_scale
-            points = np.vstack([np.zeros(3), direction * line_length])
+            points = self._helical_track(direction, line_length)
             color = _futuristic_palette(index)
-            actor = plotter.add_lines(points, color=color, width=4)
+            spline = pv.Spline(points, n_points=200)
+            try:
+                actor = plotter.add_mesh(
+                    spline,
+                    color=color,
+                    line_width=4,
+                    render_lines_as_tubes=True,
+                    ambient=0.6,
+                    specular=0.8,
+                    smooth_shading=True,
+                )
+            except TypeError:
+                actor = plotter.add_mesh(
+                    spline,
+                    color=color,
+                    line_width=4,
+                    ambient=0.6,
+                    specular=0.8,
+                    smooth_shading=True,
+                )
             self._dynamic_actors.append(actor)
 
             highlight = self._compute_highlight(particle.detector_layer, direction)
@@ -191,7 +211,7 @@ class DetectorVisualizer:
                 )
                 self._dynamic_actors.append(label_actor)
 
-        if annotation:
+        if annotation and self.show_overlay:
             annotation_actor = plotter.add_text(
                 annotation,
                 position="lower_left",
@@ -236,7 +256,6 @@ class DetectorVisualizer:
         if not self.show_overlay:
             return
         overlay_lines = [
-            "KUANTUM // CEN",  # Cinematic Event Nexus :)
             f"EVENT {event.event_id:05d}",
         ]
         if event.model_prediction is not None:
@@ -262,16 +281,65 @@ class DetectorVisualizer:
         if self._controller is None:
             return
         # Register a futuristic "touch" listener: any left click will request slow motion
-        def _on_click():
-            self._controller.request_bullet_time()
+        def _on_click(*_args, **_kwargs):
+            try:
+                self._controller.request_bullet_time()
+            except Exception:
+                return
 
-        def _on_space():
-            self._controller.toggle_pause()
+        def _on_space(*_args, **_kwargs):
+            try:
+                self._controller.toggle_pause()
+            except Exception:
+                return
 
         try:
-            plotter.add_mouse_event("LeftButtonPressEvent", lambda *_, **__: _on_click())
+            plotter.add_mouse_event("LeftButtonPressEvent", _on_click)
             plotter.add_key_event("space", lambda: _on_space())
             plotter.add_key_event("b", lambda: self._controller.request_bullet_time())
         except Exception:
             # Optional backend support; ignore failures silently
+            pass
+
+    def _helical_track(self, direction: np.ndarray, length: float) -> np.ndarray:
+        """Create a light-weight helical trajectory aligned with the particle momentum."""
+        turns = 1.5
+        steps = 120
+        t = np.linspace(0.0, 1.0, steps)
+        axis = np.array([0.0, 0.0, 1.0])
+        axis_component = np.dot(direction, axis)
+        radial_component = direction - axis_component * axis
+        radial_norm = np.linalg.norm(radial_component)
+        if radial_norm < 1e-6:
+            radial_component = np.array([1.0, 0.0, 0.0])
+            radial_norm = 1.0
+        radial_component /= radial_norm
+        orthogonal = np.cross(direction, radial_component)
+        orth_norm = np.linalg.norm(orthogonal)
+        if orth_norm < 1e-6:
+            orthogonal = np.array([0.0, 1.0, 0.0])
+            orth_norm = 1.0
+        orthogonal /= orth_norm
+        axial = direction / (np.linalg.norm(direction) + 1e-9)
+        radius = 0.4
+        z_extent = length
+        path = []
+        for param in t:
+            angle = 2 * np.pi * turns * param
+            offset = (
+                np.cos(angle) * radial_component + np.sin(angle) * orthogonal
+            ) * radius
+            axial_offset = axial * (param * z_extent)
+            path.append(offset + axial_offset)
+        return np.vstack([[0.0, 0.0, 0.0], *path])
+
+    def _configure_camera(self, plotter: "pv.Plotter") -> None:
+        try:
+            plotter.camera_position = [
+                (20.0, 15.0, 12.0),
+                (0.0, 0.0, 0.0),
+                (0.0, 0.0, 1.0),
+            ]
+            plotter.enable_parallel_projection(False)
+        except Exception:
             pass
