@@ -48,12 +48,13 @@ Command line options:
 - `--visualize`: enable real-time 3D rendering with PyVista.
 - `--filter`: only display events that the model predicts as a specific class label.
 
-The CLI preloads every event into a futuristic “video” timeline, prints a per-event summary, and—when visualisation is enabled—renders neon detector layers, glowing interaction points, and HUD overlays that update with the model prediction.
+The CLI preloads every event into a futuristic “video” timeline, prints a per-event summary, and—when visualisation is enabled—renders neon detector layers, glowing interaction points, and HUD overlays that update with the model prediction and phase of the collision.
 
 During playback use the keyboard to control the cinematic stream:
 
 - `+` speeds up the flow, `-` enters slow motion, and `1` resets to real-time.
-- `p` toggles pause/resume, while `q` gracefully ends the run.
+- `p` (or hitting the space bar inside the 3D window) toggles pause/resume, while `q` gracefully ends the run.
+- `b` (or tapping/clicking inside the viewport) arms the next collision for an extended slow-motion “bullet time” reveal of the proton injection, focusing magnets, and energy cascade phases.
 
 ## Programmatic usage
 

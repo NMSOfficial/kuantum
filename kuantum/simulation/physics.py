@@ -45,11 +45,23 @@ class Particle:
 
 
 @dataclass
+class CinematicPhase:
+    """Storyboard element for rendering a cinematic collision."""
+
+    name: str
+    duration: float
+    track_scale: float
+    glow_strength: float
+    annotation: str
+
+
+@dataclass
 class CollisionEvent:
     event_id: int
     particles: List[Particle]
     features: np.ndarray
     model_prediction: Optional[int] = None
+    cinematic_phases: List[CinematicPhase] = field(default_factory=list)
 
     def attach_prediction(self, label: int) -> None:
         self.model_prediction = label
@@ -119,11 +131,64 @@ def build_feature_vector(particles: List[Particle], max_particles: int = 11) -> 
     return _pad_features(flat, max_particles * 3)
 
 
+def build_cinematic_phases(event: CollisionEvent, geometry: DetectorGeometry) -> List[CinematicPhase]:
+    total_energy = sum(p.four_vector.energy for p in event.particles)
+    energy_scale = np.clip(total_energy / 250.0, 0.4, 1.8)
+    focus_layer = max(event.particles, key=lambda p: abs(p.eta)).detector_layer if event.particles else geometry.layers[0].name
+
+    return [
+        CinematicPhase(
+            name="Injection Sequencer",
+            duration=0.35 * energy_scale,
+            track_scale=0.15,
+            glow_strength=0.1,
+            annotation="Proton demetleri halka hatlarına giriyor.",
+        ),
+        CinematicPhase(
+            name="Magnetic Focusing",
+            duration=0.45 * energy_scale,
+            track_scale=0.35,
+            glow_strength=0.25,
+            annotation=f"Manyetik lensler ışını {focus_layer} yönünde sıkıştırıyor.",
+        ),
+        CinematicPhase(
+            name="Pre-Collision Drift",
+            duration=0.60 * energy_scale,
+            track_scale=0.65,
+            glow_strength=0.4,
+            annotation="Karşıt demetler hizalanıyor, hız kritik seviyeye ulaşıyor.",
+        ),
+        CinematicPhase(
+            name="Collision Apex",
+            duration=0.85 * energy_scale,
+            track_scale=1.05,
+            glow_strength=1.0,
+            annotation="Zaman bükülüyor, enerji patlaması gerçekleşiyor!",
+        ),
+        CinematicPhase(
+            name="Cascade Afterglow",
+            duration=0.55 * energy_scale,
+            track_scale=1.2,
+            glow_strength=0.6,
+            annotation="Parçacık izleri dedektör katmanlarına yağmur gibi düşüyor.",
+        ),
+        CinematicPhase(
+            name="Thermal Dissipation",
+            duration=0.40 * energy_scale,
+            track_scale=0.45,
+            glow_strength=0.15,
+            annotation="Kalorimetreler enerjiyi emiyor, sistem soğuyor.",
+        ),
+    ]
+
+
 def generate_event(event_id: int, geometry: DetectorGeometry, max_particles: int = 11) -> CollisionEvent:
     num_particles = np.random.poisson(lam=6) + 1
     particles = [generate_particle(geometry) for _ in range(num_particles)]
     features = build_feature_vector(particles, max_particles=max_particles)
-    return CollisionEvent(event_id=event_id, particles=particles, features=features)
+    event = CollisionEvent(event_id=event_id, particles=particles, features=features)
+    event.cinematic_phases = build_cinematic_phases(event, geometry)
+    return event
 
 
 def generate_event_stream(

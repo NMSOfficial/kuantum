@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 import numpy as np
 
 from .detector import DetectorGeometry, DetectorLayer
-from .physics import CollisionEvent
+from .physics import CinematicPhase, CollisionEvent
+
+if TYPE_CHECKING:  # pragma: no cover - circular import guard for type checking only
+    from .main import PlaybackController
 
 try:  # pragma: no cover - optional dependency
     import pyvista as pv
@@ -29,6 +33,7 @@ class DetectorVisualizer:
     _dynamic_actors: List[object] = field(default_factory=list, init=False, repr=False)
     _hud_actor: Optional[object] = field(default=None, init=False, repr=False)
     _window_initialized: bool = field(default=False, init=False, repr=False)
+    _controller: Optional["PlaybackController"] = field(default=None, init=False, repr=False)
 
     def is_available(self) -> bool:
         return pv is not None
@@ -40,6 +45,8 @@ class DetectorVisualizer:
             self._plotter = pv.Plotter(window_size=(1400, 900))
             self._plotter.set_background("black", top="midnightblue")
             self._plotter.enable_anti_aliasing()
+            self._plotter.enable_eye_dome_lighting()
+            self._plotter.enable_parallel_projection(False)
             for layer in self.geometry:
                 self._add_cylindrical_layer(self._plotter, layer)
             if self.show_overlay:
@@ -49,32 +56,47 @@ class DetectorVisualizer:
                     font_size=14,
                     color="cyan",
                 )
-            self._plotter.add_text(
-                "Fütüristik Mod", position="upper_right", font_size=12, color="#ff00d4"
-            )
+            self._register_callbacks(self._plotter)
         if not self._window_initialized:
-            self._plotter.show(auto_close=False, interactive=False)
+            self._plotter.show(auto_close=False, interactive_update=True)
             self._window_initialized = True
         return self._plotter
 
-    def animate_event(self, event: CollisionEvent) -> None:
+    def bind_controller(self, controller: "PlaybackController") -> None:
+        self._controller = controller
+        if self._plotter is not None:
+            self._register_callbacks(self._plotter)
+
+    def animate_event(self, event: CollisionEvent, *, playback_speed: float = 1.0, bullet_time: bool = False) -> None:
         plotter = self.initialize_scene()
         if plotter is None:
             return
-        self._clear_dynamic(plotter)
-        self._draw_tracks(plotter, event)
-        if self.show_overlay and self._hud_actor is not None and event.model_prediction is not None:
-            overlay = f"KUANTUM // PREDICTION {event.model_prediction}\nEVENT {event.event_id:05d}"
-            try:
-                plotter.update_text(self._hud_actor, overlay)
-            except Exception:
-                self._hud_actor = plotter.add_text(
-                    overlay,
-                    position="upper_left",
-                    font_size=14,
-                    color="cyan",
-                )
-        plotter.render()
+        phases = event.cinematic_phases or [
+            CinematicPhase(
+                name="Standard Playback",
+                duration=0.5,
+                track_scale=1.0,
+                glow_strength=0.4,
+                annotation="Canlı veri akışı",
+            )
+        ]
+
+        for index, phase in enumerate(phases):
+            self._clear_dynamic(plotter)
+            self._draw_tracks(
+                plotter,
+                event,
+                track_scale=phase.track_scale,
+                glow_strength=phase.glow_strength,
+                annotation=phase.annotation,
+            )
+            self._update_overlay(plotter, event, phase, index, len(phases))
+            plotter.render()
+            duration = phase.duration
+            if bullet_time and phase.name.lower().startswith("collision"):
+                duration *= 3.0
+            duration = duration / max(playback_speed, 0.125)
+            time.sleep(max(duration, 0.02))
 
     def finalize(self) -> None:
         if self._plotter is not None:
@@ -97,14 +119,22 @@ class DetectorVisualizer:
             specular_power=30.0,
         )
 
-    def _draw_tracks(self, plotter: "pv.Plotter", event: CollisionEvent) -> None:
+    def _draw_tracks(
+        self,
+        plotter: "pv.Plotter",
+        event: CollisionEvent,
+        *,
+        track_scale: float = 1.0,
+        glow_strength: float = 0.4,
+        annotation: Optional[str] = None,
+    ) -> None:
         for index, particle in enumerate(event.particles):
             direction = np.array(
                 [particle.four_vector.px, particle.four_vector.py, particle.four_vector.pz], dtype=float
             )
             norm = np.linalg.norm(direction) + 1e-9
             direction /= norm
-            line_length = 12.0
+            line_length = 12.0 * track_scale
             points = np.vstack([np.zeros(3), direction * line_length])
             color = _futuristic_palette(index)
             actor = plotter.add_lines(points, color=color, width=4)
@@ -112,14 +142,14 @@ class DetectorVisualizer:
 
             highlight = self._compute_highlight(particle.detector_layer, direction)
             if highlight is not None:
-                sphere = pv.Sphere(radius=0.25, center=highlight)
-                halo = pv.Sphere(radius=0.5, center=highlight)
+                sphere = pv.Sphere(radius=0.25 * (0.5 + glow_strength), center=highlight)
+                halo = pv.Sphere(radius=0.5 * (0.5 + glow_strength), center=highlight)
                 glow_actor = plotter.add_mesh(
                     halo,
                     color=color,
-                    opacity=0.18,
+                    opacity=0.15 + 0.25 * glow_strength,
                     smooth_shading=True,
-                    ambient=0.4,
+                    ambient=0.35 + 0.3 * glow_strength,
                     specular=1.0,
                 )
                 sphere_actor = plotter.add_mesh(
@@ -147,6 +177,15 @@ class DetectorVisualizer:
                 )
                 self._dynamic_actors.append(label_actor)
 
+        if annotation:
+            annotation_actor = plotter.add_text(
+                annotation,
+                position="lower_left",
+                font_size=12,
+                color="#8cfbff",
+            )
+            self._dynamic_actors.append(annotation_actor)
+
     def _compute_highlight(self, layer_name: str, direction: np.ndarray) -> Optional[np.ndarray]:
         try:
             layer = self.geometry.get_layer(layer_name)
@@ -171,3 +210,54 @@ class DetectorVisualizer:
                 except Exception:
                     continue
         self._dynamic_actors.clear()
+
+    def _update_overlay(
+        self,
+        plotter: "pv.Plotter",
+        event: CollisionEvent,
+        phase: CinematicPhase,
+        index: int,
+        total: int,
+    ) -> None:
+        if not self.show_overlay:
+            return
+        overlay_lines = [
+            "KUANTUM // CEN",  # Cinematic Event Nexus :)
+            f"EVENT {event.event_id:05d}",
+        ]
+        if event.model_prediction is not None:
+            overlay_lines.append(f"PRED {event.model_prediction}")
+        overlay_lines.append(f"PHASE {index + 1}/{total}: {phase.name.upper()}")
+        overlay = "\n".join(overlay_lines)
+
+        if self._hud_actor is not None:
+            try:
+                plotter.remove_actor(self._hud_actor, reset_camera=False)
+            except Exception:
+                pass
+            self._hud_actor = None
+
+        self._hud_actor = plotter.add_text(
+            overlay,
+            position="upper_left",
+            font_size=14,
+            color="cyan",
+        )
+
+    def _register_callbacks(self, plotter: "pv.Plotter") -> None:
+        if self._controller is None:
+            return
+        # Register a futuristic "touch" listener: any left click will request slow motion
+        def _on_click():
+            self._controller.request_bullet_time()
+
+        def _on_space():
+            self._controller.toggle_pause()
+
+        try:
+            plotter.add_mouse_event("LeftButtonPressEvent", lambda *_, **__: _on_click())
+            plotter.add_key_event("space", lambda: _on_space())
+            plotter.add_key_event("b", lambda: self._controller.request_bullet_time())
+        except Exception:
+            # Optional backend support; ignore failures silently
+            pass

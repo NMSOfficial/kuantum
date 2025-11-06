@@ -45,6 +45,8 @@ class PlaybackController:
         self.playback_speed = max(initial_speed, 0.125)
         self.paused = False
         self.should_stop = False
+        self._bullet_time_request = False
+        self._lock = threading.Lock()
         self._thread = threading.Thread(target=self._input_loop, daemon=True)
 
     def start(self) -> None:
@@ -56,7 +58,7 @@ class PlaybackController:
 
     def _input_loop(self) -> None:
         print(
-            "[Controls] '+' hızlandır | '-' yavaşlat | 'p' duraklat/devam | '1' normal hız | 'q' çıkış"
+            "[Controls] '+' hızlandır | '-' yavaşlat | 'p' duraklat/devam | '1' normal hız | 'b' çarpışma ağır çekim | 'q' çıkış"
         )
         for line in sys.stdin:
             command = line.strip().lower()
@@ -67,9 +69,7 @@ class PlaybackController:
                 print("[Playback] Çıkış isteniyor...")
                 break
             if command in {"p", "pause"}:
-                self.paused = not self.paused
-                state = "DURAKLATILDI" if self.paused else "DEVAM"
-                print(f"[Playback] {state}")
+                self.toggle_pause()
                 continue
             if command in {"1", "normal"}:
                 self.playback_speed = 1.0
@@ -83,7 +83,28 @@ class PlaybackController:
                 self.playback_speed = max(self.playback_speed / 2.0, 0.125)
                 print(f"[Playback] Hız azaltıldı: x{self.playback_speed:.2f}")
                 continue
+            if command in {"b", "bullet", "slowmo", "slow"}:
+                self.request_bullet_time()
+                continue
             print("[Playback] Komut anlaşılamadı.")
+
+    def consume_bullet_time(self) -> bool:
+        with self._lock:
+            state = self._bullet_time_request
+            self._bullet_time_request = False
+            return state
+
+    def request_bullet_time(self) -> None:
+        with self._lock:
+            self._bullet_time_request = True
+        print("[Playback] Bir sonraki çarpışma ağır çekimde oynatılacak")
+
+    def toggle_pause(self) -> None:
+        with self._lock:
+            self.paused = not self.paused
+            paused = self.paused
+        state = "DURAKLATILDI" if paused else "DEVAM"
+        print(f"[Playback] {state}")
 
 
 class EventLoop:
@@ -130,6 +151,7 @@ class EventLoop:
             return
         visualizer = DetectorVisualizer(self.geometry) if self.config.visualize else None
         if visualizer and visualizer.is_available():
+            visualizer.bind_controller(self.controller)
             visualizer.initialize_scene()
         self.controller.start()
         last_tick = time.perf_counter()
@@ -148,8 +170,13 @@ class EventLoop:
                     time.sleep(remaining)
             last_tick = time.perf_counter()
             self.display_event(frame.event)
+            bullet_time = self.controller.consume_bullet_time()
             if visualizer and visualizer.is_available():
-                visualizer.animate_event(frame.event)
+                visualizer.animate_event(
+                    frame.event,
+                    playback_speed=self.controller.playback_speed,
+                    bullet_time=bullet_time,
+                )
         if visualizer and visualizer.is_available():
             visualizer.finalize()
         self.controller.stop()
