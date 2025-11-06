@@ -46,7 +46,21 @@ class DetectorVisualizer:
             self._plotter.set_background("black", top="midnightblue")
             self._plotter.enable_anti_aliasing()
             self._plotter.enable_eye_dome_lighting()
-            self._plotter.enable_parallel_projection(False)
+            enable_parallel_projection = getattr(self._plotter, "enable_parallel_projection", None)
+            if callable(enable_parallel_projection):
+                try:
+                    enable_parallel_projection(False)
+                except TypeError:
+                    disable_parallel_projection = getattr(
+                        self._plotter, "disable_parallel_projection", None
+                    )
+                    if callable(disable_parallel_projection):
+                        disable_parallel_projection()
+                    else:
+                        try:
+                            enable_parallel_projection()
+                        except Exception:
+                            pass
             for layer in self.geometry:
                 self._add_cylindrical_layer(self._plotter, layer)
             if self.show_overlay:
