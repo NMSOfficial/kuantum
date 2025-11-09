@@ -50,6 +50,15 @@ Command line options:
 
 The CLI preloads every event into a futuristic “video” timeline, prints a per-event summary, and—when visualisation is enabled—renders neon detector layers, glowing interaction points, and HUD overlays that update with the model prediction and phase of the collision. Events are synthesised from three phenomenological profiles that mirror the pretrained classifier’s labels: **Higgs Boson Candidate**, **Dark Matter Signature**, and **QCD Background**. Each profile drives distinct energy scales, detector channels, and cinematic annotations so the playback feels physically purposeful.
 
+The synthesised detector signatures intentionally map to familiar analysis objects instead of abstract placeholders. You will see
+
+- **Central Jet** and **b-tagged Jet** sprays inside the tracker volume for Higgs-like decays,
+- **Prompt Photon** flashes and **Tracker Lepton Tracks** for bosonic and electroweak products,
+- **MET Recoil** vectors highlighting missing transverse energy in dark-matter scenarios, and
+- **Forward/Endcap hadronic showers** that characterise QCD background activity.
+
+These labels carry through to the console logs and the PyVista overlays so the narrative matches the model’s Higgs/dark-matter/QCD focus.
+
 During playback use the keyboard to control the cinematic stream:
 
 - `+` speeds up the flow, `-` enters slow motion, and `1` resets to real-time.

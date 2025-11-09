@@ -28,6 +28,7 @@ class SignalChannel:
     """Template describing how an instrument channel behaves in an event."""
 
     name: str
+    display_label: str
     energy_modifier: float
     eta_center: float
     eta_spread: float
@@ -55,6 +56,8 @@ class Particle:
 
     @property
     def display_name(self) -> str:
+        if self.channel is not None:
+            return self.channel.display_label
         return self.name.replace("_", " ").title()
 
 
@@ -91,53 +94,60 @@ CLASS_LABELS: Dict[int, str] = {
 
 
 SIGNAL_CHANNELS: Dict[str, SignalChannel] = {
-    "central_hadronic_cluster": SignalChannel(
-        name="central_hadronic_cluster",
+    "central_jet": SignalChannel(
+        name="central_jet",
+        display_label="Central Jet",
         energy_modifier=1.15,
         eta_center=0.0,
         eta_spread=0.7,
         momentum_fraction=0.92,
     ),
-    "b_tagged_spray": SignalChannel(
-        name="b_tagged_spray",
+    "b_tagged_jet": SignalChannel(
+        name="b_tagged_jet",
+        display_label="b-tagged Jet",
         energy_modifier=1.35,
-        eta_center=0.35,
-        eta_spread=0.6,
+        eta_center=0.25,
+        eta_spread=0.55,
         momentum_fraction=0.88,
     ),
-    "tracker_filament": SignalChannel(
-        name="tracker_filament",
+    "tracker_lepton_track": SignalChannel(
+        name="tracker_lepton_track",
+        display_label="Tracker Lepton Track",
         energy_modifier=0.65,
         eta_center=0.15,
         eta_spread=0.5,
         momentum_fraction=0.75,
     ),
-    "photon_flash": SignalChannel(
-        name="photon_flash",
+    "prompt_photon": SignalChannel(
+        name="prompt_photon",
+        display_label="Prompt Photon",
         energy_modifier=0.85,
-        eta_center=0.1,
-        eta_spread=0.55,
+        eta_center=0.05,
+        eta_spread=0.5,
         momentum_fraction=1.05,
     ),
-    "met_signature": SignalChannel(
-        name="met_signature",
+    "missing_transverse_energy": SignalChannel(
+        name="missing_transverse_energy",
+        display_label="MET Recoil",
         energy_modifier=0.55,
         eta_center=0.0,
         eta_spread=1.15,
         momentum_fraction=1.0,
     ),
-    "forward_cascade": SignalChannel(
-        name="forward_cascade",
+    "forward_jet": SignalChannel(
+        name="forward_jet",
+        display_label="Forward Jet",
         energy_modifier=0.9,
         eta_center=2.0,
-        eta_spread=0.4,
+        eta_spread=0.45,
         momentum_fraction=0.97,
     ),
-    "outer_flux_tube": SignalChannel(
-        name="outer_flux_tube",
+    "endcap_hadronic_shower": SignalChannel(
+        name="endcap_hadronic_shower",
+        display_label="Endcap Hadronic Shower",
         energy_modifier=1.05,
-        eta_center=2.4,
-        eta_spread=0.5,
+        eta_center=2.3,
+        eta_spread=0.55,
         momentum_fraction=1.02,
     ),
 }
@@ -165,11 +175,11 @@ EVENT_PROFILES: Dict[int, EventProfile] = {
         eta_spread=0.85,
         forward_bias=0.35,
         channel_distribution=[
-            ("central_hadronic_cluster", 0.32),
-            ("b_tagged_spray", 0.28),
-            ("tracker_filament", 0.18),
-            ("photon_flash", 0.12),
-            ("met_signature", 0.1),
+            ("b_tagged_jet", 0.32),
+            ("central_jet", 0.28),
+            ("prompt_photon", 0.16),
+            ("tracker_lepton_track", 0.14),
+            ("missing_transverse_energy", 0.1),
         ],
     ),
     1: EventProfile(
@@ -181,11 +191,11 @@ EVENT_PROFILES: Dict[int, EventProfile] = {
         eta_spread=1.15,
         forward_bias=0.55,
         channel_distribution=[
-            ("met_signature", 0.35),
-            ("forward_cascade", 0.25),
-            ("tracker_filament", 0.15),
-            ("central_hadronic_cluster", 0.15),
-            ("photon_flash", 0.1),
+            ("missing_transverse_energy", 0.38),
+            ("forward_jet", 0.22),
+            ("central_jet", 0.16),
+            ("prompt_photon", 0.12),
+            ("tracker_lepton_track", 0.12),
         ],
     ),
     2: EventProfile(
@@ -197,11 +207,11 @@ EVENT_PROFILES: Dict[int, EventProfile] = {
         eta_spread=0.95,
         forward_bias=0.25,
         channel_distribution=[
-            ("central_hadronic_cluster", 0.36),
-            ("forward_cascade", 0.24),
-            ("outer_flux_tube", 0.18),
-            ("tracker_filament", 0.12),
-            ("photon_flash", 0.1),
+            ("central_jet", 0.36),
+            ("forward_jet", 0.24),
+            ("endcap_hadronic_shower", 0.18),
+            ("tracker_lepton_track", 0.12),
+            ("prompt_photon", 0.1),
         ],
     ),
 }
