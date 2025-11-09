@@ -69,11 +69,7 @@ class DetectorVisualizer:
             if background_managed:
                 self._window_initialized = True
         if not self._window_initialized:
-            try:
-                self._plotter.show(auto_close=False, interactive=False)
-            except TypeError:
-                # Some versions require keyword-only arguments
-                self._plotter.show(auto_close=False)
+            self._initialize_window(self._plotter)
             self._window_initialized = True
         return self._plotter
 
@@ -107,11 +103,12 @@ class DetectorVisualizer:
             )
             self._update_overlay(plotter, event, phase, index, len(phases))
             plotter.render()
+            self._pump_events(plotter)
             duration = phase.duration
             if bullet_time and phase.name.lower().startswith("collision"):
                 duration *= 3.0
             duration = duration / max(playback_speed, 0.125)
-            time.sleep(max(duration, 0.02))
+            self._sleep_with_events(plotter, max(duration, 0.02))
 
     def finalize(self) -> None:
         if self._plotter is not None:
@@ -423,3 +420,54 @@ class DetectorVisualizer:
                 except Exception:
                     pass
         return plotter, False
+
+    def _initialize_window(self, plotter: "pv.Plotter") -> None:
+        """Start the plotting window in non-blocking mode when possible."""
+        with np.errstate(all="ignore"):
+            try:
+                plotter.show(auto_close=False, interactive_update=True)
+                return
+            except TypeError:
+                pass
+            except Exception:
+                # Fall back to other strategies below
+                pass
+        for kwargs in (
+            {"auto_close": False, "interactive": False},
+            {"auto_close": False},
+            {},
+        ):
+            try:
+                plotter.show(**kwargs)
+                break
+            except TypeError:
+                continue
+            except Exception:
+                continue
+        self._pump_events(plotter)
+
+    def _pump_events(self, plotter: "pv.Plotter") -> None:
+        """Process GUI events so the window stays responsive."""
+        for attr in ("app", "qt_app", "qtapp", "qapp", "_app"):
+            app = getattr(plotter, attr, None)
+            if app is None:
+                continue
+            try:
+                app.processEvents()
+            except Exception:
+                continue
+        try:
+            plotter.update()
+        except Exception:
+            pass
+
+    def _sleep_with_events(self, plotter: "pv.Plotter", duration: float) -> None:
+        """Sleep while intermittently flushing GUI events."""
+        end_time = time.time() + max(duration, 0.0)
+        while True:
+            remaining = end_time - time.time()
+            if remaining <= 0:
+                break
+            self._pump_events(plotter)
+            time.sleep(min(0.02, remaining))
+        self._pump_events(plotter)
