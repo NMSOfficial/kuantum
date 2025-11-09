@@ -376,6 +376,12 @@ def generate_event_stream(
     max_particles: int = 11,
 ) -> Generator[CollisionEvent, None, None]:
     event_id = 0
-    while max_events is None or event_id < max_events:
+    if max_events is not None and max_events < 0:
+        raise ValueError("max_events must be non-negative when provided")
+
+    while True:
+        if max_events is not None and event_id >= max_events:
+            break
+
         yield generate_event(event_id, geometry, max_particles=max_particles)
         event_id += 1
