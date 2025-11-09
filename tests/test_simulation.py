@@ -41,3 +41,22 @@ def test_timeline_preloads_events():
     loop.prepare_timeline()
     assert loop.timeline, "timeline should not be empty"
     assert all(isinstance(frame.event, CollisionEvent) for frame in loop.timeline)
+
+
+def test_zero_rate_requires_max_events():
+    geometry = default_geometry()
+    config = SimulationConfig(
+        max_events=None,
+        event_rate=0.0,
+        prediction_filter=None,
+        visualize=False,
+        simulation_duration=5.0,
+        initial_speed=1.0,
+    )
+    loop = EventLoop(geometry, config)
+    try:
+        loop.prepare_timeline()
+    except ValueError as exc:
+        assert "Event rate must be positive" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError when event_rate <= 0 without max_events")

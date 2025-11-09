@@ -60,6 +60,9 @@ class PlaybackController:
         print(
             "[Controls] '+' hızlandır | '-' yavaşlat | 'p' duraklat/devam | '1' normal hız | 'b' çarpışma ağır çekim | 'q' çıkış"
         )
+        print(
+            "[Görselleştirme] Fare ile döndür/pan/zoom | Yukarı/Aşağı ok: kamera zoom | 'r': kamera sıfırla"
+        )
         for line in sys.stdin:
             command = line.strip().lower()
             if not command:
@@ -122,6 +125,10 @@ class EventLoop:
     def prepare_timeline(self) -> None:
         if self.config.simulation_duration <= 0 and self.config.max_events is None:
             raise ValueError("Simulation duration or max events must be positive.")
+        if self.config.event_rate <= 0 and self.config.max_events is None:
+            raise ValueError(
+                "Event rate must be positive when max events is not specified to avoid endless generation."
+            )
         max_events = self._determine_event_count()
         interval = self.config.event_interval
         scheduled_index = 0
@@ -236,6 +243,12 @@ def _prompt_for_duration() -> float:
 def run_cli(argv: Optional[Iterable[str]] = None) -> None:
     args = parse_args(argv)
     duration = args.duration if args.duration is not None else _prompt_for_duration()
+    if args.rate <= 0 and args.events is None:
+        print(
+            "Hata: Sonsuz olay üretimini önlemek için --rate pozitif olmalı ya da --events belirtilmeli.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
     geometry = default_geometry()
     config = SimulationConfig(
         max_events=args.events,

@@ -42,10 +42,18 @@ class DetectorVisualizer:
         if not self.is_available():
             return None
         if self._plotter is None:
-            self._plotter = pv.Plotter(window_size=(1400, 900))
+            plotter, background_managed = self._create_plotter()
+            self._plotter = plotter
             self._plotter.set_background("black", top="midnightblue")
-            self._plotter.enable_anti_aliasing()
-            self._plotter.enable_eye_dome_lighting()
+            with np.errstate(all="ignore"):
+                try:
+                    self._plotter.enable_anti_aliasing()
+                except Exception:
+                    pass
+                try:
+                    self._plotter.enable_eye_dome_lighting()
+                except Exception:
+                    pass
             self._apply_parallel_projection(self._plotter, enable=False)
             for layer in self.geometry:
                 self._add_cylindrical_layer(self._plotter, layer)
@@ -58,12 +66,14 @@ class DetectorVisualizer:
                 )
             self._register_callbacks(self._plotter)
             self._configure_camera(self._plotter)
+            if background_managed:
+                self._window_initialized = True
         if not self._window_initialized:
             try:
-                self._plotter.show(auto_close=False, interactive_update=True)
+                self._plotter.show(auto_close=False, interactive=False)
             except TypeError:
                 # Some versions require keyword-only arguments
-                self._plotter.show(auto_close=False, interactive_update=True, interactive=False)
+                self._plotter.show(auto_close=False)
             self._window_initialized = True
         return self._plotter
 
@@ -259,6 +269,7 @@ class DetectorVisualizer:
     def _register_callbacks(self, plotter: "pv.Plotter") -> None:
         if self._controller is None:
             return
+
         def _on_space(*_args, **_kwargs):
             try:
                 self._controller.toggle_pause()
@@ -268,11 +279,46 @@ class DetectorVisualizer:
         try:
             plotter.add_key_event("space", lambda: _on_space())
             plotter.add_key_event("b", lambda: self._controller.request_bullet_time())
+            plotter.add_key_event("Up", lambda: self._adjust_zoom(plotter, factor=1.2))
+            plotter.add_key_event("Down", lambda: self._adjust_zoom(plotter, factor=0.85))
+            plotter.add_key_event("r", lambda: self._reset_camera(plotter))
         except Exception:
             # Optional backend support; ignore failures silently
             pass
         try:
             plotter.enable_trackball_style()
+        except Exception:
+            pass
+
+    def _adjust_zoom(self, plotter: "pv.Plotter", *, factor: float) -> None:
+        camera = getattr(plotter, "camera", None)
+        if camera is None:
+            return
+        for method_name in ("Zoom", "zoom"):
+            zoom = getattr(camera, method_name, None)
+            if callable(zoom):
+                try:
+                    zoom(factor)
+                    return
+                except Exception:
+                    continue
+        try:
+            position = np.asarray(camera.position, dtype=float)
+            focal = np.asarray(camera.focal_point, dtype=float)
+            direction = focal - position
+            position = focal - direction * factor
+            camera.position = tuple(position.tolist())
+        except Exception:
+            pass
+
+    def _reset_camera(self, plotter: "pv.Plotter") -> None:
+        try:
+            plotter.camera_position = [
+                (20.0, 15.0, 12.0),
+                (0.0, 0.0, 0.0),
+                (0.0, 0.0, 1.0),
+            ]
+            plotter.reset_camera_clipping_range()
         except Exception:
             pass
 
@@ -316,6 +362,7 @@ class DetectorVisualizer:
                 (0.0, 0.0, 1.0),
             ]
             self._apply_parallel_projection(plotter, enable=False)
+            plotter.reset_camera_clipping_range()
         except Exception:
             pass
 
@@ -352,3 +399,27 @@ class DetectorVisualizer:
                     disable()
                 except Exception:
                     pass
+
+    def _create_plotter(self) -> tuple["pv.Plotter", bool]:
+        """Create an interactive plotter and return whether it manages its own window."""
+        background_cls = getattr(pv, "BackgroundPlotter", None)
+        if background_cls is not None:
+            try:
+                plotter = background_cls(window_size=(1400, 900), title="Kuantum Collider")
+                try:
+                    plotter.app.processEvents()
+                except Exception:
+                    pass
+                return plotter, True
+            except Exception:
+                pass
+        try:
+            plotter = pv.Plotter(window_size=(1400, 900))
+        except TypeError:
+            plotter = pv.Plotter()
+            with np.errstate(all="ignore"):
+                try:
+                    plotter.window_size = (1400, 900)
+                except Exception:
+                    pass
+        return plotter, False
