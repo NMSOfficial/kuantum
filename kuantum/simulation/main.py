@@ -60,6 +60,9 @@ class PlaybackController:
         print(
             "[Controls] '+' hızlandır | '-' yavaşlat | 'p' duraklat/devam | '1' normal hız | 'b' çarpışma ağır çekim | 'q' çıkış"
         )
+        print(
+            "[Görselleştirme] Fare ile döndür/pan/zoom | Yukarı/Aşağı ok: kamera zoom | 'r': kamera sıfırla"
+        )
         for line in sys.stdin:
             command = line.strip().lower()
             if not command:
