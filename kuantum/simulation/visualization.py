@@ -183,7 +183,7 @@ class DetectorVisualizer:
                 )
                 self._dynamic_actors.extend([glow_actor, sphere_actor])
                 label = (
-                    f"{particle.name.upper()}\n{particle.detector_layer}\nE={particle.four_vector.energy:.1f} GeV"
+                    f"{particle.display_name.upper()}\n{particle.detector_layer}\nE={particle.four_vector.energy:.1f} GeV"
                 )
                 label_actor = plotter.add_point_labels(
                     [highlight],

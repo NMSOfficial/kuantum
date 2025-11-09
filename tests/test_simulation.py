@@ -17,6 +17,8 @@ def test_generate_event_feature_length():
     assert event.features.shape == (33,)
     assert event.cinematic_phases, "cinematic storyboard should be populated"
     assert all(phase.duration > 0 for phase in event.cinematic_phases)
+    assert event.true_label in {0, 1, 2}
+    assert event.event_family
 
 
 def test_predictor_outputs_integer_label():

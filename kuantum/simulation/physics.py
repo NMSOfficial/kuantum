@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass, field
-from typing import Generator, Iterable, List, Optional
+from typing import Dict, Generator, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -23,15 +23,25 @@ class FourVector:
         return np.array([self.energy, self.px, self.py, self.pz], dtype=np.float32)
 
 
+@dataclass(frozen=True)
+class SignalChannel:
+    """Template describing how an instrument channel behaves in an event."""
+
+    name: str
+    energy_modifier: float
+    eta_center: float
+    eta_spread: float
+    momentum_fraction: float
+
+
 @dataclass
 class Particle:
     name: str
-    mass: float
-    charge: int
     four_vector: FourVector
     eta: float
     phi: float
     detector_layer: str
+    channel: Optional[SignalChannel] = None
 
     def to_feature_vector(self) -> np.ndarray:
         return np.array(
@@ -42,6 +52,10 @@ class Particle:
             ],
             dtype=np.float32,
         )
+
+    @property
+    def display_name(self) -> str:
+        return self.name.replace("_", " ").title()
 
 
 @dataclass
@@ -61,20 +75,136 @@ class CollisionEvent:
     particles: List[Particle]
     features: np.ndarray
     model_prediction: Optional[int] = None
+    true_label: Optional[int] = None
+    event_family: Optional[str] = None
     cinematic_phases: List[CinematicPhase] = field(default_factory=list)
 
     def attach_prediction(self, label: int) -> None:
         self.model_prediction = label
 
 
-PARTICLE_CATALOG = [
-    ("electron", 0.000511, -1),
-    ("muon", 0.105, -1),
-    ("pion", 0.139, 1),
-    ("kaon", 0.494, 1),
-    ("proton", 0.938, 1),
-    ("photon", 0.0, 0),
-]
+CLASS_LABELS: Dict[int, str] = {
+    0: "Higgs Boson Candidate",
+    1: "Dark Matter Signature",
+    2: "QCD Background",
+}
+
+
+SIGNAL_CHANNELS: Dict[str, SignalChannel] = {
+    "central_hadronic_cluster": SignalChannel(
+        name="central_hadronic_cluster",
+        energy_modifier=1.15,
+        eta_center=0.0,
+        eta_spread=0.7,
+        momentum_fraction=0.92,
+    ),
+    "b_tagged_spray": SignalChannel(
+        name="b_tagged_spray",
+        energy_modifier=1.35,
+        eta_center=0.35,
+        eta_spread=0.6,
+        momentum_fraction=0.88,
+    ),
+    "tracker_filament": SignalChannel(
+        name="tracker_filament",
+        energy_modifier=0.65,
+        eta_center=0.15,
+        eta_spread=0.5,
+        momentum_fraction=0.75,
+    ),
+    "photon_flash": SignalChannel(
+        name="photon_flash",
+        energy_modifier=0.85,
+        eta_center=0.1,
+        eta_spread=0.55,
+        momentum_fraction=1.05,
+    ),
+    "met_signature": SignalChannel(
+        name="met_signature",
+        energy_modifier=0.55,
+        eta_center=0.0,
+        eta_spread=1.15,
+        momentum_fraction=1.0,
+    ),
+    "forward_cascade": SignalChannel(
+        name="forward_cascade",
+        energy_modifier=0.9,
+        eta_center=2.0,
+        eta_spread=0.4,
+        momentum_fraction=0.97,
+    ),
+    "outer_flux_tube": SignalChannel(
+        name="outer_flux_tube",
+        energy_modifier=1.05,
+        eta_center=2.4,
+        eta_spread=0.5,
+        momentum_fraction=1.02,
+    ),
+}
+
+
+@dataclass(frozen=True)
+class EventProfile:
+    label: int
+    name: str
+    selection_weight: float
+    base_cluster_rate: float
+    energy_scale: float
+    eta_spread: float
+    forward_bias: float
+    channel_distribution: Sequence[Tuple[str, float]]
+
+
+EVENT_PROFILES: Dict[int, EventProfile] = {
+    0: EventProfile(
+        label=0,
+        name=CLASS_LABELS[0],
+        selection_weight=0.35,
+        base_cluster_rate=6.5,
+        energy_scale=70.0,
+        eta_spread=0.85,
+        forward_bias=0.35,
+        channel_distribution=[
+            ("central_hadronic_cluster", 0.32),
+            ("b_tagged_spray", 0.28),
+            ("tracker_filament", 0.18),
+            ("photon_flash", 0.12),
+            ("met_signature", 0.1),
+        ],
+    ),
+    1: EventProfile(
+        label=1,
+        name=CLASS_LABELS[1],
+        selection_weight=0.25,
+        base_cluster_rate=5.0,
+        energy_scale=85.0,
+        eta_spread=1.15,
+        forward_bias=0.55,
+        channel_distribution=[
+            ("met_signature", 0.35),
+            ("forward_cascade", 0.25),
+            ("tracker_filament", 0.15),
+            ("central_hadronic_cluster", 0.15),
+            ("photon_flash", 0.1),
+        ],
+    ),
+    2: EventProfile(
+        label=2,
+        name=CLASS_LABELS[2],
+        selection_weight=0.4,
+        base_cluster_rate=7.5,
+        energy_scale=55.0,
+        eta_spread=0.95,
+        forward_bias=0.25,
+        channel_distribution=[
+            ("central_hadronic_cluster", 0.36),
+            ("forward_cascade", 0.24),
+            ("outer_flux_tube", 0.18),
+            ("tracker_filament", 0.12),
+            ("photon_flash", 0.1),
+        ],
+    ),
+}
 
 
 def sample_energy(scale: float = 50.0) -> float:
@@ -102,18 +232,48 @@ def choose_detector_layer(eta: float, geometry: DetectorGeometry) -> str:
     return geometry.layers[-1].name
 
 
-def generate_particle(geometry: DetectorGeometry) -> Particle:
-    name, mass, charge = random.choice(PARTICLE_CATALOG)
-    energy = sample_energy()
-    momentum = sample_momentum(energy, mass)
-    eta = sample_pseudorapidity()
+def _select_profile() -> EventProfile:
+    profiles = list(EVENT_PROFILES.values())
+    weights = np.array([profile.selection_weight for profile in profiles], dtype=np.float64)
+    weights /= weights.sum()
+    index = np.random.choice(len(profiles), p=weights)
+    return profiles[index]
+
+
+def _select_channel(profile: EventProfile) -> SignalChannel:
+    names, weights = zip(*profile.channel_distribution)
+    probs = np.array(weights, dtype=np.float64)
+    probs /= probs.sum()
+    index = np.random.choice(len(names), p=probs)
+    return SIGNAL_CHANNELS[names[index]]
+
+
+def generate_particle(profile: EventProfile, geometry: DetectorGeometry) -> Particle:
+    channel = _select_channel(profile)
+    shape = 2.0 + 0.4 * channel.energy_modifier
+    scale = max(profile.energy_scale * channel.energy_modifier / shape, 1e-3)
+    energy = float(np.random.gamma(shape=shape, scale=scale))
+    energy = max(energy, 1e-3)
+    eta_width = max(0.25, channel.eta_spread * profile.eta_spread)
+    orientation = 1.0 if random.random() > 0.5 else -1.0
+    eta_center = channel.eta_center * orientation * (0.6 + profile.forward_bias)
+    eta = float(np.random.normal(loc=eta_center, scale=eta_width))
+    eta = float(np.clip(eta, -2.8, 2.8))
     phi = sample_phi()
+    momentum = max(channel.momentum_fraction * energy, 1e-3)
     px = momentum * math.cos(phi)
     py = momentum * math.sin(phi)
     pz = momentum * math.sinh(eta)
     layer = choose_detector_layer(eta, geometry)
     four_vector = FourVector(energy=energy, px=px, py=py, pz=pz)
-    return Particle(name=name, mass=mass, charge=charge, four_vector=four_vector, eta=eta, phi=phi, detector_layer=layer)
+    return Particle(
+        name=channel.name,
+        four_vector=four_vector,
+        eta=eta,
+        phi=phi,
+        detector_layer=layer,
+        channel=channel,
+    )
 
 
 def _pad_features(features: np.ndarray, target_length: int) -> np.ndarray:
@@ -135,6 +295,7 @@ def build_cinematic_phases(event: CollisionEvent, geometry: DetectorGeometry) ->
     total_energy = sum(p.four_vector.energy for p in event.particles)
     energy_scale = np.clip(total_energy / 250.0, 0.4, 1.8)
     focus_layer = max(event.particles, key=lambda p: abs(p.eta)).detector_layer if event.particles else geometry.layers[0].name
+    event_name = event.event_family or "Çarpışma"
 
     return [
         CinematicPhase(
@@ -142,35 +303,35 @@ def build_cinematic_phases(event: CollisionEvent, geometry: DetectorGeometry) ->
             duration=0.35 * energy_scale,
             track_scale=0.15,
             glow_strength=0.1,
-            annotation="Proton demetleri halka hatlarına giriyor.",
+            annotation=f"{event_name}: Demetler hızlandırıcı tüneline besleniyor.",
         ),
         CinematicPhase(
             name="Magnetic Focusing",
             duration=0.45 * energy_scale,
             track_scale=0.35,
             glow_strength=0.25,
-            annotation=f"Manyetik lensler ışını {focus_layer} yönünde sıkıştırıyor.",
+            annotation=f"Manyetik lensler {focus_layer} katmanında ışını odaklıyor.",
         ),
         CinematicPhase(
             name="Pre-Collision Drift",
             duration=0.60 * energy_scale,
             track_scale=0.65,
             glow_strength=0.4,
-            annotation="Karşıt demetler hizalanıyor, hız kritik seviyeye ulaşıyor.",
+            annotation=f"{event_name}: Karşıt demetler hizalanıyor.",
         ),
         CinematicPhase(
             name="Collision Apex",
             duration=0.85 * energy_scale,
             track_scale=1.05,
             glow_strength=1.0,
-            annotation="Zaman bükülüyor, enerji patlaması gerçekleşiyor!",
+            annotation=f"{event_name}: Enerji patlaması zirvede!",
         ),
         CinematicPhase(
             name="Cascade Afterglow",
             duration=0.55 * energy_scale,
             track_scale=1.2,
             glow_strength=0.6,
-            annotation="Parçacık izleri dedektör katmanlarına yağmur gibi düşüyor.",
+            annotation="Dedektör katmanları boyunca iz yağmuru.",
         ),
         CinematicPhase(
             name="Thermal Dissipation",
@@ -183,10 +344,17 @@ def build_cinematic_phases(event: CollisionEvent, geometry: DetectorGeometry) ->
 
 
 def generate_event(event_id: int, geometry: DetectorGeometry, max_particles: int = 11) -> CollisionEvent:
-    num_particles = np.random.poisson(lam=6) + 1
-    particles = [generate_particle(geometry) for _ in range(num_particles)]
+    profile = _select_profile()
+    num_particles = int(np.random.poisson(lam=profile.base_cluster_rate)) + 1
+    particles = [generate_particle(profile, geometry) for _ in range(num_particles)]
     features = build_feature_vector(particles, max_particles=max_particles)
-    event = CollisionEvent(event_id=event_id, particles=particles, features=features)
+    event = CollisionEvent(
+        event_id=event_id,
+        particles=particles,
+        features=features,
+        true_label=profile.label,
+        event_family=profile.name,
+    )
     event.cinematic_phases = build_cinematic_phases(event, geometry)
     return event
 

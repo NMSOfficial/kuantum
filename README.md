@@ -48,7 +48,7 @@ Command line options:
 - `--visualize`: enable real-time 3D rendering with PyVista.
 - `--filter`: only display events that the model predicts as a specific class label.
 
-The CLI preloads every event into a futuristic “video” timeline, prints a per-event summary, and—when visualisation is enabled—renders neon detector layers, glowing interaction points, and HUD overlays that update with the model prediction and phase of the collision.
+The CLI preloads every event into a futuristic “video” timeline, prints a per-event summary, and—when visualisation is enabled—renders neon detector layers, glowing interaction points, and HUD overlays that update with the model prediction and phase of the collision. Events are synthesised from three phenomenological profiles that mirror the pretrained classifier’s labels: **Higgs Boson Candidate**, **Dark Matter Signature**, and **QCD Background**. Each profile drives distinct energy scales, detector channels, and cinematic annotations so the playback feels physically purposeful.
 
 During playback use the keyboard to control the cinematic stream:
 

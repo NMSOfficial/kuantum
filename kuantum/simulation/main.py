@@ -12,7 +12,7 @@ import numpy as np
 
 from ..models import load_model_and_scaler
 from .detector import DetectorGeometry, default_geometry
-from .physics import CollisionEvent, generate_event_stream
+from .physics import CLASS_LABELS, CollisionEvent, generate_event_stream
 from .visualization import DetectorVisualizer
 
 
@@ -207,12 +207,19 @@ class EventLoop:
         return int(pred)
 
     def display_event(self, event: CollisionEvent) -> None:
+        predicted_name = (
+            CLASS_LABELS.get(event.model_prediction, str(event.model_prediction))
+            if event.model_prediction is not None
+            else "?"
+        )
+        family = event.event_family or "Çarpışma"
+        truth_name = CLASS_LABELS.get(event.true_label, "Bilinmeyen")
         print(
-            f"Event {event.event_id} -> prediction: {event.model_prediction} | parçacık sayısı: {len(event.particles)}"
+            f"Event {event.event_id} -> sahne: {family} | model tahmini: {predicted_name} | gerçekçi profil: {truth_name}"
         )
         for particle in event.particles:
             print(
-                f"  {particle.name:8s} | E={particle.four_vector.energy:7.2f} GeV | eta={particle.eta:+.2f} | layer={particle.detector_layer}"
+                f"  {particle.display_name:22s} | E={particle.four_vector.energy:7.2f} GeV | eta={particle.eta:+.2f} | layer={particle.detector_layer}"
             )
         print("-" * 60)
 
