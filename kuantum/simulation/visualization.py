@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 import numpy as np
 
 from .detector import DetectorGeometry, DetectorLayer
-from .physics import CinematicPhase, CollisionEvent
+from .physics import CLASS_LABELS, CinematicPhase, CollisionEvent, Particle
 
 if TYPE_CHECKING:  # pragma: no cover - circular import guard for type checking only
     from .main import PlaybackController
@@ -20,9 +20,27 @@ except Exception:  # pragma: no cover - optional dependency
     pv = None
 
 
-def _futuristic_palette(index: int) -> str:
-    palette = ["#00f7ff", "#ff00d4", "#ffe800", "#21ff6b", "#ff6f61"]
-    return palette[index % len(palette)]
+
+@dataclass(frozen=True)
+class ChannelStyle:
+    """Colour and annotation style for a detector signal channel."""
+
+    color: str
+    halo_opacity: float
+    label_color: str = "white"
+
+
+_CHANNEL_STYLES: Dict[str, ChannelStyle] = {
+    "central_jet": ChannelStyle(color="#ffb000", halo_opacity=0.22),
+    "b_tagged_jet": ChannelStyle(color="#d94f2a", halo_opacity=0.28),
+    "tracker_lepton_track": ChannelStyle(color="#3a6ea5", halo_opacity=0.18),
+    "prompt_photon": ChannelStyle(color="#f5c04e", halo_opacity=0.24),
+    "missing_transverse_energy": ChannelStyle(color="#6bb1c9", halo_opacity=0.2),
+    "forward_jet": ChannelStyle(color="#b07aa1", halo_opacity=0.18),
+    "endcap_hadronic_shower": ChannelStyle(color="#8c6c3a", halo_opacity=0.25),
+}
+
+_DEFAULT_CHANNEL_STYLE = ChannelStyle(color="#63a375", halo_opacity=0.2)
 
 
 @dataclass
@@ -57,12 +75,13 @@ class DetectorVisualizer:
             self._apply_parallel_projection(self._plotter, enable=False)
             for layer in self.geometry:
                 self._add_cylindrical_layer(self._plotter, layer)
+            self._add_reference_primitives(self._plotter)
             if self.show_overlay:
                 self._hud_actor = self._plotter.add_text(
-                    "Collision stream ready",
+                    "Beamline calibration in progress",
                     position="upper_left",
                     font_size=14,
-                    color="white",
+                    color="#d8dee9",
                 )
             self._register_callbacks(self._plotter)
             self._configure_camera(self._plotter)
@@ -140,7 +159,7 @@ class DetectorVisualizer:
         glow_strength: float = 0.4,
         annotation: Optional[str] = None,
     ) -> None:
-        for index, particle in enumerate(event.particles):
+        for particle in event.particles:
             direction = np.array(
                 [particle.four_vector.px, particle.four_vector.py, particle.four_vector.pz], dtype=float
             )
@@ -148,7 +167,8 @@ class DetectorVisualizer:
             direction /= norm
             line_length = 12.0 * track_scale
             points = self._helical_track(direction, line_length)
-            color = _futuristic_palette(index)
+            style = self._style_for_particle(particle)
+            color = style.color
             spline = pv.Spline(points, n_points=200)
             track_mesh = spline.tube(radius=0.12)
             actor = plotter.add_mesh(
@@ -162,15 +182,16 @@ class DetectorVisualizer:
 
             highlight = self._compute_highlight(particle.detector_layer, direction)
             if highlight is not None:
-                sphere = pv.Sphere(radius=0.25 * (0.5 + glow_strength), center=highlight)
-                halo = pv.Sphere(radius=0.5 * (0.5 + glow_strength), center=highlight)
+                halo_strength = glow_strength + style.halo_opacity
+                sphere = pv.Sphere(radius=0.22 * (0.8 + halo_strength), center=highlight)
+                halo = pv.Sphere(radius=0.45 * (0.8 + halo_strength), center=highlight)
                 glow_actor = plotter.add_mesh(
                     halo,
                     color=color,
-                    opacity=0.15 + 0.25 * glow_strength,
+                    opacity=min(0.6, 0.18 + 0.35 * halo_strength),
                     smooth_shading=True,
-                    ambient=0.35 + 0.3 * glow_strength,
-                    specular=1.0,
+                    ambient=0.3 + 0.25 * halo_strength,
+                    specular=0.9,
                 )
                 sphere_actor = plotter.add_mesh(
                     sphere,
@@ -182,17 +203,20 @@ class DetectorVisualizer:
                     smooth_shading=True,
                 )
                 self._dynamic_actors.extend([glow_actor, sphere_actor])
+                transverse_momentum = np.linalg.norm([particle.four_vector.px, particle.four_vector.py])
                 label = (
-                    f"{particle.display_name.upper()}\n{particle.detector_layer}\nE={particle.four_vector.energy:.1f} GeV"
+                    f"{particle.display_name}\n"
+                    f"Layer: {particle.detector_layer}\n"
+                    f"E={particle.four_vector.energy:.1f} GeV | pT={transverse_momentum:.1f} GeV | η={particle.eta:+.2f}"
                 )
                 label_actor = plotter.add_point_labels(
                     [highlight],
                     [label],
                     point_color=color,
-                    text_color="white",
-                    font_size=12,
+                    text_color=style.label_color,
+                    font_size=11,
                     always_visible=True,
-                    shape_color="#111111",
+                    shape_color="#1b1d23",
                     fill_shape=True,
                 )
                 self._dynamic_actors.append(label_actor)
@@ -201,8 +225,8 @@ class DetectorVisualizer:
             annotation_actor = plotter.add_text(
                 annotation,
                 position="lower_left",
-                font_size=12,
-                color="#8cfbff",
+                font_size=11,
+                color="#a3d6ff",
             )
             self._dynamic_actors.append(annotation_actor)
 
@@ -241,12 +265,7 @@ class DetectorVisualizer:
     ) -> None:
         if not self.show_overlay:
             return
-        overlay_lines = [
-            f"EVENT {event.event_id:05d}",
-        ]
-        if event.model_prediction is not None:
-            overlay_lines.append(f"PRED {event.model_prediction}")
-        overlay_lines.append(f"PHASE {index + 1}/{total}: {phase.name.upper()}")
+        overlay_lines = self._event_overlay_lines(event, phase, index, total)
         overlay = "\n".join(overlay_lines)
 
         if self._hud_actor is not None:
@@ -259,8 +278,8 @@ class DetectorVisualizer:
         self._hud_actor = plotter.add_text(
             overlay,
             position="upper_left",
-            font_size=14,
-            color="cyan",
+            font_size=13,
+            color="#c0d2f0",
         )
 
     def _register_callbacks(self, plotter: "pv.Plotter") -> None:
@@ -319,6 +338,36 @@ class DetectorVisualizer:
         except Exception:
             pass
 
+    def _event_overlay_lines(
+        self, event: CollisionEvent, phase: CinematicPhase, index: int, total: int
+    ) -> List[str]:
+        total_energy = sum(p.four_vector.energy for p in event.particles)
+        model_label = self._label_name(event.model_prediction)
+        true_label = self._label_name(event.true_label)
+        family = event.event_family or model_label
+        lines = [
+            f"Event {event.event_id:05d} | Family: {family}",
+            f"Model: {model_label} | Truth: {true_label}",
+            f"ΣE={total_energy:.1f} GeV | N={len(event.particles)}",
+            f"Phase {index + 1}/{total}: {phase.name}",
+        ]
+        if phase.annotation:
+            lines.append(phase.annotation)
+        return lines
+
+    def _label_name(self, label: Optional[int]) -> str:
+        if label is None:
+            return "Unknown"
+        return CLASS_LABELS.get(label, str(label))
+
+    def _style_for_particle(self, particle: Particle) -> ChannelStyle:
+        channel = getattr(particle, "channel", None)
+        if channel is not None:
+            style = _CHANNEL_STYLES.get(channel.name)
+            if style is not None:
+                return style
+        return _DEFAULT_CHANNEL_STYLE
+
     def _helical_track(self, direction: np.ndarray, length: float) -> np.ndarray:
         """Create a light-weight helical trajectory aligned with the particle momentum."""
         turns = 1.5
@@ -360,6 +409,24 @@ class DetectorVisualizer:
             ]
             self._apply_parallel_projection(plotter, enable=False)
             plotter.reset_camera_clipping_range()
+        except Exception:
+            pass
+
+    def _add_reference_primitives(self, plotter: "pv.Plotter") -> None:
+        """Add axis indicators and a transverse plane for scientific context."""
+        try:
+            plotter.show_axes(line_width=2, color="#d8dee9")
+        except Exception:
+            pass
+        try:
+            plane = pv.Plane(center=(0.0, 0.0, 0.0), direction=(0.0, 0.0, 1.0), i_size=18.0, j_size=18.0)
+            plotter.add_mesh(
+                plane,
+                color="#1a1c1f",
+                opacity=0.08,
+                style="wireframe",
+                line_width=1,
+            )
         except Exception:
             pass
 

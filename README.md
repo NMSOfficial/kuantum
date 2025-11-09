@@ -48,7 +48,7 @@ Command line options:
 - `--visualize`: enable real-time 3D rendering with PyVista.
 - `--filter`: only display events that the model predicts as a specific class label.
 
-The CLI preloads every event into a futuristic “video” timeline, prints a per-event summary, and—when visualisation is enabled—renders neon detector layers, glowing interaction points, and HUD overlays that update with the model prediction and phase of the collision. Events are synthesised from three phenomenological profiles that mirror the pretrained classifier’s labels: **Higgs Boson Candidate**, **Dark Matter Signature**, and **QCD Background**. Each profile drives distinct energy scales, detector channels, and cinematic annotations so the playback feels physically purposeful.
+The CLI preloads every event into a cinematic timeline, prints a per-event summary, and—when visualisation is enabled—renders a detector-inspired scene with silicon tracker barrels, calorimeter volumes, and muon stations. Interaction points inherit analysis-driven colour palettes, labels report transverse momentum/η alongside detector layers, and the HUD tracks the active phase of the collision together with model and truth labels. Events are synthesised from three phenomenological profiles that mirror the pretrained classifier’s labels: **Higgs Boson Candidate**, **Dark Matter Signature**, and **QCD Background**. Each profile drives distinct energy scales, detector channels, and storyboard annotations so the playback mirrors typical collider studies.
 
 The synthesised detector signatures intentionally map to familiar analysis objects instead of abstract placeholders. You will see
 
@@ -57,7 +57,7 @@ The synthesised detector signatures intentionally map to familiar analysis objec
 - **MET Recoil** vectors highlighting missing transverse energy in dark-matter scenarios, and
 - **Forward/Endcap hadronic showers** that characterise QCD background activity.
 
-These labels carry through to the console logs and the PyVista overlays so the narrative matches the model’s Higgs/dark-matter/QCD focus.
+These labels carry through to the console logs and the PyVista overlays—now presented with experiment-style typography, axes, and transverse plane guides—so the narrative matches the model’s Higgs/dark-matter/QCD focus.
 
 During playback use the keyboard to control the cinematic stream:
 

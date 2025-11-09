@@ -156,7 +156,9 @@ class EventLoop:
         if not self.timeline:
             print("Gösterilecek etkinlik yok.")
             return
-        visualizer = DetectorVisualizer(self.geometry) if self.config.visualize else None
+        visualizer = (
+            DetectorVisualizer(self.geometry, show_overlay=True) if self.config.visualize else None
+        )
         if visualizer and visualizer.is_available():
             visualizer.bind_controller(self.controller)
             visualizer.initialize_scene()
