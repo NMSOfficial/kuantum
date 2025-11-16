@@ -109,6 +109,17 @@ def load_model(config: Optional[ModelConfig] = None, *, config_path: Optional[Pa
     ).to(device)
 
     state_dict = torch.load(cfg.model_path, map_location=device)
+
+    # Older checkpoints can store a zero-sized categorical mask embedding when
+    # the training run did not use categorical features.  Recent versions of the
+    # architecture allocate a dummy slot instead, so we patch the loaded state
+    # dict to avoid size mismatches when the stored tensor is empty.
+    mask_key = "mask_embeds_cat.weight"
+    if mask_key in state_dict:
+        weight = state_dict[mask_key]
+        if hasattr(weight, "numel") and weight.numel() == 0:
+            state_dict[mask_key] = model.mask_embeds_cat.weight.detach().clone()
+
     model.load_state_dict(state_dict)
     model.eval()
     return model, device, cfg
