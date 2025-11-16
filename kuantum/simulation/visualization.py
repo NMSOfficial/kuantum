@@ -52,6 +52,7 @@ class DetectorVisualizer:
     _hud_actor: Optional[object] = field(default=None, init=False, repr=False)
     _window_initialized: bool = field(default=False, init=False, repr=False)
     _controller: Optional["PlaybackController"] = field(default=None, init=False, repr=False)
+    _analysis_summary: Dict[str, str] = field(default_factory=dict, init=False, repr=False)
 
     def is_available(self) -> bool:
         return pv is not None
@@ -96,6 +97,9 @@ class DetectorVisualizer:
         self._controller = controller
         if self._plotter is not None:
             self._register_callbacks(self._plotter)
+
+    def set_analysis_summary(self, summary: Dict[str, str]) -> None:
+        self._analysis_summary = dict(summary)
 
     def animate_event(self, event: CollisionEvent, *, playback_speed: float = 1.0, bullet_time: bool = False) -> None:
         plotter = self.initialize_scene()
@@ -353,6 +357,10 @@ class DetectorVisualizer:
         ]
         if phase.annotation:
             lines.append(phase.annotation)
+        if self._analysis_summary:
+            lines.append("")
+            for title, description in self._analysis_summary.items():
+                lines.append(f"{title}: {description}")
         return lines
 
     def _label_name(self, label: Optional[int]) -> str:

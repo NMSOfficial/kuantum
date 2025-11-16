@@ -6,14 +6,20 @@ import argparse
 import sys
 import time
 from dataclasses import dataclass
-from typing import Iterable, List, Optional
+from pathlib import Path
+from typing import Iterable, List, Optional, Dict
 
 import numpy as np
 
 from ..models import load_model_and_scaler
+from .analysis import MultiAgentAnalysisPanel
 from .detector import DetectorGeometry, default_geometry
+from .geometry_io import load_geometry
 from .physics import CLASS_LABELS, CollisionEvent, generate_event_stream
+from .reporting import SimulationReporter
+from .transport import TransportSimulator
 from .visualization import DetectorVisualizer
+from .vr import VRSceneExporter
 
 
 @dataclass
@@ -24,6 +30,9 @@ class SimulationConfig:
     visualize: bool
     simulation_duration: float
     initial_speed: float
+    vr_export_path: Optional[Path]
+    report_path: Optional[Path]
+    compile_report: bool
 
     @property
     def event_interval(self) -> float:
@@ -121,6 +130,16 @@ class EventLoop:
         self.num_continuous = artifacts.config.num_continuous
         self.timeline: List[EventFrame] = []
         self.controller = PlaybackController(config.initial_speed)
+        self.transport = TransportSimulator(self.geometry)
+        self.analysis_panel = MultiAgentAnalysisPanel()
+        self._vr_export_path = config.vr_export_path
+        self._vr_exporter = VRSceneExporter(self.geometry) if config.vr_export_path else None
+        self._report_path = config.report_path
+        self._reporter = (
+            SimulationReporter(self.geometry, compile_pdf=config.compile_report) if config.report_path else None
+        )
+        self._artifacts_exported = False
+        self._visualizer: Optional[DetectorVisualizer] = None
 
     def prepare_timeline(self) -> None:
         if self.config.simulation_duration <= 0 and self.config.max_events is None:
@@ -133,7 +152,7 @@ class EventLoop:
         interval = self.config.event_interval
         scheduled_index = 0
         print("Simülasyon verileri hazırlanıyor...")
-        for event in generate_event_stream(self.geometry, max_events=max_events):
+        for event in generate_event_stream(self.geometry, max_events=max_events, transport=self.transport):
             prediction = self.predict_event(event)
             event.attach_prediction(prediction)
             if self.config.prediction_filter is not None and prediction != self.config.prediction_filter:
@@ -142,6 +161,7 @@ class EventLoop:
             self.timeline.append(EventFrame(event=event, time_offset=time_offset))
             scheduled_index += 1
         print(f"Hazırlanan kare sayısı: {len(self.timeline)}")
+        self._export_artifacts()
 
     def _determine_event_count(self) -> Optional[int]:
         if self.config.max_events is not None:
@@ -160,8 +180,11 @@ class EventLoop:
             DetectorVisualizer(self.geometry, show_overlay=True) if self.config.visualize else None
         )
         if visualizer and visualizer.is_available():
-            visualizer.bind_controller(self.controller)
-            visualizer.initialize_scene()
+            self._visualizer = visualizer
+            self._visualizer.bind_controller(self.controller)
+            self._visualizer.initialize_scene()
+        else:
+            self._visualizer = None
         self.controller.start()
         last_tick = time.perf_counter()
         for frame in self.timeline:
@@ -178,17 +201,38 @@ class EventLoop:
                 if remaining > 0:
                     time.sleep(remaining)
             last_tick = time.perf_counter()
-            self.display_event(frame.event)
+            analysis_snapshot = self.analysis_panel.update(frame.event)
+            self.display_event(frame.event, analysis_snapshot)
             bullet_time = self.controller.consume_bullet_time()
-            if visualizer and visualizer.is_available():
-                visualizer.animate_event(
+            if self._visualizer and self._visualizer.is_available():
+                self._visualizer.set_analysis_summary(analysis_snapshot)
+                self._visualizer.animate_event(
                     frame.event,
                     playback_speed=self.controller.playback_speed,
                     bullet_time=bullet_time,
                 )
-        if visualizer and visualizer.is_available():
-            visualizer.finalize()
+        if self._visualizer and self._visualizer.is_available():
+            self._visualizer.finalize()
+            self._visualizer = None
         self.controller.stop()
+
+    def _export_artifacts(self) -> None:
+        if self._artifacts_exported or not self.timeline:
+            return
+        events = [frame.event for frame in self.timeline]
+        if self._vr_exporter and self._vr_export_path is not None:
+            try:
+                output = self._vr_exporter.export_html(events, self._vr_export_path)
+                print(f"[Export] VR sahnesi kaydedildi: {output}")
+            except Exception as exc:
+                print(f"[Export] VR sahnesi oluşturulamadı: {exc}", file=sys.stderr)
+        if self._reporter and self._report_path is not None:
+            try:
+                output = self._reporter.build_report(events, self._report_path)
+                print(f"[Export] Rapor taslağı yazıldı: {output}")
+            except Exception as exc:
+                print(f"[Export] Rapor üretimi başarısız: {exc}", file=sys.stderr)
+        self._artifacts_exported = True
 
     def predict_event(self, event: CollisionEvent) -> int:
         features = event.features
@@ -208,7 +252,7 @@ class EventLoop:
             pred = torch.argmax(logits, dim=-1).item()
         return int(pred)
 
-    def display_event(self, event: CollisionEvent) -> None:
+    def display_event(self, event: CollisionEvent, analysis_snapshot: Optional[Dict[str, str]] = None) -> None:
         predicted_name = (
             CLASS_LABELS.get(event.model_prediction, str(event.model_prediction))
             if event.model_prediction is not None
@@ -223,6 +267,14 @@ class EventLoop:
             print(
                 f"  {particle.display_name:22s} | E={particle.four_vector.energy:7.2f} GeV | eta={particle.eta:+.2f} | layer={particle.detector_layer}"
             )
+        if event.transport_summary and event.transport_summary.layer_totals:
+            print("  [Katman Enerji Profili]")
+            for layer, energy in event.transport_summary.layer_totals.items():
+                print(f"    {layer}: {energy:.2f} GeV")
+        if analysis_snapshot:
+            print("[Analiz Paneli]")
+            for title, description in analysis_snapshot.items():
+                print(f"  {title}: {description}")
         print("-" * 60)
 
 
@@ -234,6 +286,12 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     parser.add_argument("--speed", type=float, default=1.0, help="Initial playback speed multiplier")
     parser.add_argument("--visualize", action="store_true", help="Enable 3D visualization with PyVista")
     parser.add_argument("--filter", type=int, default=None, help="Only display events predicted as the given class label")
+    parser.add_argument("--geometry-file", type=str, default=None, help="External detector geometry (GDML/ROOT/JSON)")
+    parser.add_argument("--geometry-format", type=str, choices=["gdml", "json", "root"], default=None, help="Explicit geometry format override")
+    parser.add_argument("--geometry-tree", type=str, default=None, help="ROOT tree containing layer definitions")
+    parser.add_argument("--export-vr", type=str, default=None, help="Export VR-ready HTML scene to this path")
+    parser.add_argument("--report", type=str, default=None, help="Export LaTeX run report to this path")
+    parser.add_argument("--compile-report", action="store_true", help="Compile the LaTeX report with pdflatex")
     return parser.parse_args(argv)
 
 
@@ -258,7 +316,16 @@ def run_cli(argv: Optional[Iterable[str]] = None) -> None:
             file=sys.stderr,
         )
         raise SystemExit(2)
-    geometry = default_geometry()
+    if args.geometry_file:
+        try:
+            geometry = load_geometry(args.geometry_file, fmt=args.geometry_format, tree=args.geometry_tree)
+        except Exception as exc:
+            print(f"Geometri yüklenemedi: {exc}", file=sys.stderr)
+            raise SystemExit(2)
+    else:
+        geometry = default_geometry()
+    vr_path = Path(args.export_vr) if args.export_vr else None
+    report_path = Path(args.report) if args.report else None
     config = SimulationConfig(
         max_events=args.events,
         event_rate=args.rate,
@@ -266,6 +333,9 @@ def run_cli(argv: Optional[Iterable[str]] = None) -> None:
         visualize=args.visualize,
         simulation_duration=duration,
         initial_speed=args.speed,
+        vr_export_path=vr_path,
+        report_path=report_path,
+        compile_report=args.compile_report,
     )
     loop = EventLoop(geometry, config)
     try:

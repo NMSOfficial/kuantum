@@ -310,7 +310,7 @@ class TabAttention(nn.Module):
             self.register_buffer("cat_mask_offset", cat_mask_offset)
         else:
             self.register_buffer("cat_mask_offset", torch.zeros(0, dtype=torch.int8))
-        self.mask_embeds_cat = nn.Embedding(self.num_categories * 2, self.dim) if self.num_categories > 0 else nn.Embedding(0, self.dim)
+        self.mask_embeds_cat = nn.Embedding(max(self.num_categories * 2, 1), self.dim)
 
         if self.num_continuous > 0:
             con_fill = torch.full((self.num_continuous,), 2, dtype=torch.int8)
