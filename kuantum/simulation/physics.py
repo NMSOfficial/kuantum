@@ -10,6 +10,7 @@ from typing import Dict, Generator, List, Optional, Sequence, Tuple
 import numpy as np
 
 from .detector import DetectorGeometry
+from .transport import TransportSimulator, TransportSummary
 
 
 @dataclass
@@ -81,6 +82,7 @@ class CollisionEvent:
     true_label: Optional[int] = None
     event_family: Optional[str] = None
     cinematic_phases: List[CinematicPhase] = field(default_factory=list)
+    transport_summary: Optional[TransportSummary] = None
 
     def attach_prediction(self, label: int) -> None:
         self.model_prediction = label
@@ -353,7 +355,13 @@ def build_cinematic_phases(event: CollisionEvent, geometry: DetectorGeometry) ->
     ]
 
 
-def generate_event(event_id: int, geometry: DetectorGeometry, max_particles: int = 11) -> CollisionEvent:
+def generate_event(
+    event_id: int,
+    geometry: DetectorGeometry,
+    *,
+    max_particles: int = 11,
+    transport: Optional[TransportSimulator] = None,
+) -> CollisionEvent:
     profile = _select_profile()
     num_particles = int(np.random.poisson(lam=profile.base_cluster_rate)) + 1
     particles = [generate_particle(profile, geometry) for _ in range(num_particles)]
@@ -366,6 +374,8 @@ def generate_event(event_id: int, geometry: DetectorGeometry, max_particles: int
         event_family=profile.name,
     )
     event.cinematic_phases = build_cinematic_phases(event, geometry)
+    if transport is not None:
+        event.transport_summary = transport.propagate(particles)
     return event
 
 
@@ -374,14 +384,22 @@ def generate_event_stream(
     *,
     max_events: Optional[int] = None,
     max_particles: int = 11,
+    transport: Optional[TransportSimulator] = None,
 ) -> Generator[CollisionEvent, None, None]:
     event_id = 0
     if max_events is not None and max_events < 0:
         raise ValueError("max_events must be non-negative when provided")
 
+    transport_engine = transport or TransportSimulator(geometry)
+
     while True:
         if max_events is not None and event_id >= max_events:
             break
 
-        yield generate_event(event_id, geometry, max_particles=max_particles)
+        yield generate_event(
+            event_id,
+            geometry,
+            max_particles=max_particles,
+            transport=transport_engine,
+        )
         event_id += 1
